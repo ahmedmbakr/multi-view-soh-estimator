@@ -175,10 +175,24 @@ def train_cnn_model_on_dataframes(train_df: pd.DataFrame, val_df: pd.DataFrame, 
     print(f"Validation X shape: {val_X.shape}, Validation y shape: {val_y.shape}")
     print(f"Test X shape: {test_X.shape}, Test y shape: {test_y.shape}")
 
+    from nyquist_cnn import train_nyquist_cnn_from_arrays
+    model, (mean, std), logs = train_nyquist_cnn_from_arrays(
+        train_X, train_y,
+        val_X=val_X, val_y=val_y,
+        epochs=50,
+        batch_size=32,
+        lr=1e-3,
+    )
+    print("Training logs:")
+    for key, values in logs.items():
+        print(f"{key}: {values}")
+
+    print ("Training complete.")
+
     
 
 def main():
-    USE_SAVED_ML_DATA_CSV = False
+    USE_SAVED_ML_DATA_CSV = True
     if USE_SAVED_ML_DATA_CSV:
         current_python_file_path = Path(__file__)
         base_path = current_python_file_path.parent
