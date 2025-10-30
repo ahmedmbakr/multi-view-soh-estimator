@@ -74,12 +74,42 @@ class NyquistArrayDataset(Dataset):
         yb = torch.tensor(self.y[idx])         # scalar
         return xb, yb
 
+# ---------- Metrics ----------
+def _compute_regression_metrics(y_true, y_pred):
+    """Compute RMSE, MAE, MAPE given numpy arrays of targets and predictions."""
+    y_true = np.asarray(y_true, dtype=np.float32)
+    y_pred = np.asarray(y_pred, dtype=np.float32)
+    err = y_pred - y_true
+    mae = float(np.mean(np.abs(err)))
+    rmse = float(np.sqrt(np.mean(err ** 2)))
+    eps = 1e-6
+    mape = float(np.mean(np.abs(err) / (np.abs(y_true) + eps)) * 100.0)
+    return {"rmse": rmse, "mae": mae, "mape": mape}
+
+@torch.no_grad()
+def evaluate_metrics_on_loader(model, loader, device=None):
+    """Run model on a DataLoader of (xb, yb) and return RMSE/MAE/MAPE."""
+    device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+    model.eval().to(device)
+    preds, trues = [], []
+    for xb, yb in loader:
+        xb = xb.to(device)
+        yhat = model(xb)
+        preds.append(yhat.detach().cpu().numpy())
+        trues.append(yb.detach().cpu().numpy())
+    y_pred = np.concatenate(preds, axis=0)
+    y_true = np.concatenate(trues, axis=0)
+    return _compute_regression_metrics(y_true, y_pred)
+
 # ---------- Training / Eval ----------
 def train_nyquist_cnn_from_arrays(
     train_X, train_y, val_X=None, val_y=None,
     epochs=200, batch_size=32, lr=1e-3, weight_decay=1e-4,
     huber_delta=1.0, early_patience=20, device=None
 ):
+    print("Training TinyNyquistCNN model with the following parameters:")
+    print(f"  epochs={epochs}, batch_size={batch_size}, lr={lr}, weight_decay={weight_decay}")
+    print(f"  huber_delta={huber_delta}, early_patience={early_patience}")
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
 
     # Fit normalization on train only
@@ -102,7 +132,7 @@ def train_nyquist_cnn_from_arrays(
     best_val = math.inf
     best_state = None
     wait = 0
-    logs = {"train_loss": [], "val_loss": []}
+    logs = {"train_loss": [], "val_loss": [], "val_rmse": [], "val_mae": [], "val_mape": []}
 
     for ep in range(epochs):
         # --- train ---
@@ -129,6 +159,12 @@ def train_nyquist_cnn_from_arrays(
                     va_total += criterion(model(xb), yb).item() * xb.size(0)
             va_loss = va_total / len(val_ld.dataset)
             logs["val_loss"].append(va_loss)
+
+            # compute validation metrics (RMSE/MAE/MAPE)
+            val_metrics = evaluate_metrics_on_loader(model, val_ld, device=device)
+            logs["val_rmse"].append(val_metrics["rmse"])
+            logs["val_mae"].append(val_metrics["mae"])
+            logs["val_mape"].append(val_metrics["mape"])
 
             if va_loss < best_val - 1e-6:
                 best_val = va_loss

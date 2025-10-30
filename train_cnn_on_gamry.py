@@ -8,6 +8,8 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 from collections import Counter
+from nyquist_cnn import train_nyquist_cnn_from_arrays, TinyNyquistCNN
+
 
 def create_ml_data_dataframe():
     battery_cells = ["B10", "B11", "B12"]
@@ -133,11 +135,12 @@ def create_train_val_test_splits(ML_data_df: pd.DataFrame):
 
     return train_df, val_df, test_df
 
-def train_cnn_model_on_dataframes(train_df: pd.DataFrame, val_df: pd.DataFrame, test_df: pd.DataFrame):
+def train_cnn_model_on_dataframes(train_df: pd.DataFrame, val_df: pd.DataFrame, test_df: pd.DataFrame) -> TinyNyquistCNN:
     print("Training CNN model on the provided dataframes...")
     print(f"Train DataFrame size: {len(train_df)}")
     print(f"Validation DataFrame size: {len(val_df)}")
     print(f"Test DataFrame size: {len(test_df)}")
+
     
     train_X = train_df.drop(columns=["battery_cell_name", "cycle_number", "SOH_percent"]).values
     # reshape train_X from (N, 122) -> (N, 61, 2) with [:,:,0]=Z_real and [:,:,1]=Z_imag
@@ -175,23 +178,112 @@ def train_cnn_model_on_dataframes(train_df: pd.DataFrame, val_df: pd.DataFrame, 
     print(f"Validation X shape: {val_X.shape}, Validation y shape: {val_y.shape}")
     print(f"Test X shape: {test_X.shape}, Test y shape: {test_y.shape}")
 
-    from nyquist_cnn import train_nyquist_cnn_from_arrays
     model, (mean, std), logs = train_nyquist_cnn_from_arrays(
         train_X, train_y,
         val_X=val_X, val_y=val_y,
-        epochs=50,
-        batch_size=32,
-        lr=1e-3,
+        epochs=200,
+        batch_size=16,
+        lr=1e-2,
     )
-    print("Training logs:")
-    for key, values in logs.items():
-        print(f"{key}: {values}")
+
+    print("Training loss at end of training:", logs.get("train_loss", [])[-1] if logs.get("train_loss") else "N/A")
+    print("Validation loss at end of training:", logs.get("val_loss", [])[-1] if logs.get("val_loss") else "N/A")
+    print("Final Validation MAE:", logs.get("val_mae", [])[-1] if logs.get("val_mae") else "N/A")
+    print("Final Validation MAPE:", logs.get("val_mape", [])[-1] if logs.get("val_mape") else "N/A")
+    print("Final Validation RMSE:", logs.get("val_rmse", [])[-1] if logs.get("val_rmse") else "N/A")
+
+    # Plot training/validation loss curves
+    plot_train_val_loss_curves(logs)
+    plot_val_rmse_curves(logs)
+    plot_mae_and_mape_curves(logs)
 
     print ("Training complete.")
 
-    
+    # Save the trained model and normalization stats
+    import torch
+    model_save_path = Path("cnn_gamry_model.pth")
+    torch.save({
+        "model_state_dict": model.state_dict(),
+        "mean": mean,
+        "std": std,
+    }, model_save_path)
+    print(f"Saved trained model and normalization stats to {model_save_path}")
+
+    test_trained_model_on_test_set(model, test_X, test_y, (mean, std))
+
+    return model
+
+def plot_train_val_loss_curves(logs):
+    import matplotlib.pyplot as plt
+
+    train_losses = logs.get("train_loss", [])
+    val_losses = logs.get("val_loss", [])
+    epochs = range(1, len(train_losses) + 1)
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(epochs, train_losses, label="Training Loss")
+    plt.plot(epochs, val_losses, label="Validation Loss")
+    plt.xlabel("Epochs")
+    plt.ylabel("Loss")
+    plt.title("Training and Validation Loss Curves")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+def plot_val_rmse_curves(logs):
+    import matplotlib.pyplot as plt
+
+    val_rmse = logs.get("val_rmse", [])
+    epochs = range(1, len(val_rmse) + 1)
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(epochs, val_rmse, label="Validation RMSE", color='orange')
+    plt.xlabel("Epochs")
+    plt.ylabel("RMSE")
+    plt.title("Validation RMSE Curve")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+def plot_mae_and_mape_curves(logs):
+    import matplotlib.pyplot as plt
+
+    val_mae = logs.get("val_mae", [])
+    val_mape = logs.get("val_mape", [])
+    val_rmse = logs.get("val_rmse", [])
+    epochs = range(1, len(val_mae) + 1)
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(epochs, val_mae, label="Validation MAE", color='green')
+    plt.plot(epochs, val_mape, label="Validation MAPE", color='red')
+    plt.plot(epochs, val_rmse, label="Validation RMSE", color='orange')
+    plt.xlabel("Epochs")
+    plt.ylabel("Error")
+    plt.title("Validation MAE, MAPE, and RMSE Curves")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+def test_trained_model_on_test_set(model: TinyNyquistCNN, test_X: np.ndarray, test_y: np.ndarray, norm_stats):
+    from nyquist_cnn import predict_soh_arrays
+    from sklearn.metrics import mean_squared_error, mean_absolute_error
+
+    predicted_y = predict_soh_arrays(model, test_X, norm_stats, batch_size=64)
+
+    rmse = np.sqrt(mean_squared_error(test_y, predicted_y))
+    mae = mean_absolute_error(test_y, predicted_y)
+    mape = np.mean(np.abs((test_y - predicted_y) / test_y)) * 100.0
+
+    print(f"Test Set Performance:")
+    print(f"RMSE: {rmse:.4f}")
+    print(f"MAE: {mae:.4f}")
+    print(f"MAPE: {mape:.4f}%")
 
 def main():
+    # Fix the random seed for reproducibility
+    np.random.seed(42)
+    import torch
+    torch.manual_seed(42)
     USE_SAVED_ML_DATA_CSV = True
     if USE_SAVED_ML_DATA_CSV:
         current_python_file_path = Path(__file__)
@@ -210,10 +302,6 @@ def main():
         train_df, val_df, test_df = create_train_val_test_splits(ML_data_df)
     
     train_cnn_model_on_dataframes(train_df, val_df, test_df)
-
-
-
-
 
 if __name__ == "__main__":
     main()
