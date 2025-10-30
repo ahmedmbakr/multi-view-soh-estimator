@@ -135,44 +135,39 @@ def create_train_val_test_splits(ML_data_df: pd.DataFrame):
 
     return train_df, val_df, test_df
 
+def get_nyquist_train_val_test_data(
+    train_df: pd.DataFrame,
+    val_df: pd.DataFrame,
+    test_df: pd.DataFrame
+):
+    # Extract features and targets from the dataframes
+    def extract_X_y(df: pd.DataFrame):
+        X = df.drop(columns=["battery_cell_name", "cycle_number", "SOH_percent"]).values
+        # reshape X from (N, 2n) -> (N, n, 2) with [:,:,0]=Z_real and [:,:,1]=Z_imag
+        num_features = X.shape[1]
+        if num_features % 2 != 0:
+            raise ValueError(f"Expected even number of features (real+imag), got {num_features}")
+        num_freq = num_features // 2
+
+        z_real = X[:, :num_freq].astype(np.float32)
+        z_imag = X[:, num_freq:].astype(np.float32)
+        X_reshaped = np.stack((z_real, z_imag), axis=2)
+        y = df["SOH_percent"].values.astype(np.float32)
+        return X_reshaped, y
+
+    train_X, train_y = extract_X_y(train_df)
+    val_X, val_y = extract_X_y(val_df)
+    test_X, test_y = extract_X_y(test_df)
+
+    return train_X, train_y, val_X, val_y, test_X, test_y
+
 def train_cnn_model_on_dataframes(train_df: pd.DataFrame, val_df: pd.DataFrame, test_df: pd.DataFrame) -> TinyNyquistCNN:
     print("Training CNN model on the provided dataframes...")
     print(f"Train DataFrame size: {len(train_df)}")
     print(f"Validation DataFrame size: {len(val_df)}")
     print(f"Test DataFrame size: {len(test_df)}")
 
-    
-    train_X = train_df.drop(columns=["battery_cell_name", "cycle_number", "SOH_percent"]).values
-    # reshape train_X from (N, 122) -> (N, 61, 2) with [:,:,0]=Z_real and [:,:,1]=Z_imag
-    num_features = train_X.shape[1]
-    if num_features % 2 != 0:
-        raise ValueError(f"Expected even number of features (real+imag), got {num_features}")
-    num_freq = num_features // 2
-
-    z_real = train_X[:, :num_freq].astype(np.float32)
-    z_imag = train_X[:, num_freq:].astype(np.float32)
-    train_X = np.stack((z_real, z_imag), axis=2)
-    train_y = train_df["SOH_percent"].values
-    # ensure train targets are float32
-    train_y = train_y.astype(np.float32)
-
-    # prepare validation set (same processing as train_X)
-    _val_raw = val_df.drop(columns=["battery_cell_name", "cycle_number", "SOH_percent"]).values
-    if _val_raw.shape[1] != num_features:
-        raise ValueError(f"Validation features ({_val_raw.shape[1]}) do not match train features ({num_features})")
-    _val_z_real = _val_raw[:, :num_freq].astype(np.float32)
-    _val_z_imag = _val_raw[:, num_freq:].astype(np.float32)
-    val_X = np.stack((_val_z_real, _val_z_imag), axis=2)
-    val_y = val_df["SOH_percent"].values.astype(np.float32)
-
-    # prepare test set (same processing as train_X)
-    _test_raw = test_df.drop(columns=["battery_cell_name", "cycle_number", "SOH_percent"]).values
-    if _test_raw.shape[1] != num_features:
-        raise ValueError(f"Test features ({_test_raw.shape[1]}) do not match train features ({num_features})")
-    _test_z_real = _test_raw[:, :num_freq].astype(np.float32)
-    _test_z_imag = _test_raw[:, num_freq:].astype(np.float32)
-    test_X = np.stack((_test_z_real, _test_z_imag), axis=2)
-    test_y = test_df["SOH_percent"].values.astype(np.float32)
+    train_X, train_y, val_X, val_y, test_X, test_y = get_nyquist_train_val_test_data(train_df, val_df, test_df)
 
     print(f"Train X shape: {train_X.shape}, Train y shape: {train_y.shape}")
     print(f"Validation X shape: {val_X.shape}, Validation y shape: {val_y.shape}")
@@ -194,7 +189,6 @@ def train_cnn_model_on_dataframes(train_df: pd.DataFrame, val_df: pd.DataFrame, 
 
     # Plot training/validation loss curves
     plot_train_val_loss_curves(logs)
-    plot_val_rmse_curves(logs)
     plot_mae_and_mape_curves(logs)
 
     print ("Training complete.")
@@ -226,21 +220,6 @@ def plot_train_val_loss_curves(logs):
     plt.xlabel("Epochs")
     plt.ylabel("Loss")
     plt.title("Training and Validation Loss Curves")
-    plt.legend()
-    plt.grid(True)
-    plt.show()
-
-def plot_val_rmse_curves(logs):
-    import matplotlib.pyplot as plt
-
-    val_rmse = logs.get("val_rmse", [])
-    epochs = range(1, len(val_rmse) + 1)
-
-    plt.figure(figsize=(10, 6))
-    plt.plot(epochs, val_rmse, label="Validation RMSE", color='orange')
-    plt.xlabel("Epochs")
-    plt.ylabel("RMSE")
-    plt.title("Validation RMSE Curve")
     plt.legend()
     plt.grid(True)
     plt.show()
