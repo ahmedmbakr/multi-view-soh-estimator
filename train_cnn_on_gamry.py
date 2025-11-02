@@ -8,8 +8,8 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 from collections import Counter
-from nyquist_cnn import train_nyquist_cnn_from_arrays, TinyNyquistCNN
-
+from nyquist_cnn import train_nyquist_cnn_from_arrays, predict_soh_arrays, TinyNyquistCNN
+from typing import Tuple
 
 def create_ml_data_dataframe():
     battery_cells = ["B10", "B11", "B12"]
@@ -161,7 +161,7 @@ def get_nyquist_train_val_test_data(
 
     return train_X, train_y, val_X, val_y, test_X, test_y
 
-def train_cnn_model_on_dataframes(train_df: pd.DataFrame, val_df: pd.DataFrame, test_df: pd.DataFrame) -> TinyNyquistCNN:
+def train_cnn_model_on_dataframes(train_df: pd.DataFrame, val_df: pd.DataFrame, test_df: pd.DataFrame) -> Tuple[TinyNyquistCNN, Tuple[np.ndarray, np.ndarray], dict]:
     print("Training CNN model on the provided dataframes...")
     print(f"Train DataFrame size: {len(train_df)}")
     print(f"Validation DataFrame size: {len(val_df)}")
@@ -179,6 +179,9 @@ def train_cnn_model_on_dataframes(train_df: pd.DataFrame, val_df: pd.DataFrame, 
         epochs=200,
         batch_size=16,
         lr=1e-2,
+        early_patience=50,
+        weight_decay=5e-4, # L2 regularization. The higher this value, the stronger the regularization
+        huber_delta=1.0, # delta parameter for Huber loss. Larger delta means less sensitivity to outliers.
     )
 
     print("Training loss at end of training:", logs.get("train_loss", [])[-1] if logs.get("train_loss") else "N/A")
@@ -205,7 +208,7 @@ def train_cnn_model_on_dataframes(train_df: pd.DataFrame, val_df: pd.DataFrame, 
 
     test_trained_model_on_test_set(model, test_X, test_y, (mean, std))
 
-    return model
+    return model, (mean, std), logs
 
 def plot_train_val_loss_curves(logs):
     import matplotlib.pyplot as plt
@@ -244,10 +247,11 @@ def plot_mae_and_mape_curves(logs):
     plt.show()
 
 def test_trained_model_on_test_set(model: TinyNyquistCNN, test_X: np.ndarray, test_y: np.ndarray, norm_stats):
-    from nyquist_cnn import predict_soh_arrays
     from sklearn.metrics import mean_squared_error, mean_absolute_error
 
     predicted_y = predict_soh_arrays(model, test_X, norm_stats, batch_size=64)
+
+    plot_predicted_vs_true_soh(test_y, predicted_y)
 
     rmse = np.sqrt(mean_squared_error(test_y, predicted_y))
     mae = mean_absolute_error(test_y, predicted_y)
@@ -258,16 +262,53 @@ def test_trained_model_on_test_set(model: TinyNyquistCNN, test_X: np.ndarray, te
     print(f"MAE: {mae:.4f}")
     print(f"MAPE: {mape:.4f}%")
 
+def plot_predicted_vs_true_soh(true_y: np.ndarray, predicted_y: np.ndarray):
+    import matplotlib.pyplot as plt
+
+    plt.figure(figsize=(8, 8))
+    plt.scatter(true_y, predicted_y, alpha=0.6)
+    plt.plot([true_y.min(), true_y.max()], [true_y.min(), true_y.max()], 'r--', lw=2) # diagonal line. LW=line width
+    plt.xlabel("True SOH (%)")
+    plt.ylabel("Predicted SOH (%)")
+    plt.title("Predicted vs True SOH on Test Set")
+    plt.grid(True)
+    plt.axis('equal')
+    plt.show()
+
+def plot_true_soh_vs_predicted_soh_for_battery_cell(cell_name, filtered_ML_data_df, model, norm_stats):
+    import matplotlib.pyplot as plt
+
+    cell_df = filtered_ML_data_df[filtered_ML_data_df["battery_cell_name"] == cell_name]
+    if cell_df.empty:
+        print(f"No data found for battery cell {cell_name}.")
+        return
+
+    test_X, test_y = get_nyquist_train_val_test_data(
+        cell_df, cell_df, cell_df
+    )[:2]  # only need test_X, test_y
+
+    predicted_y = predict_soh_arrays(model, test_X, norm_stats, batch_size=64)
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(test_y, label="True SOH", marker='o')
+    plt.plot(predicted_y, label="Predicted SOH", marker='x')
+    plt.xlabel("Sample Index")
+    plt.ylabel("SOH (%)")
+    plt.title(f"True vs Predicted SOH for Battery Cell {cell_name}")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
 def main():
     # Fix the random seed for reproducibility
     np.random.seed(42)
     import torch
     torch.manual_seed(42)
     USE_SAVED_ML_DATA_CSV = True
+    current_python_file_path = Path(__file__)
+    base_path = current_python_file_path.parent
+    data_dir = base_path / "data"
     if USE_SAVED_ML_DATA_CSV:
-        current_python_file_path = Path(__file__)
-        base_path = current_python_file_path.parent
-        data_dir = base_path / "data"
         assert data_dir.exists(), f"Data directory does not exist: {data_dir}"
         train_data_csv_path = data_dir / "train_data.csv"
         val_data_csv_path = data_dir / "val_data.csv"
@@ -280,7 +321,13 @@ def main():
         ML_data_df = create_ml_data_dataframe()
         train_df, val_df, test_df = create_train_val_test_splits(ML_data_df)
     
-    train_cnn_model_on_dataframes(train_df, val_df, test_df)
+    model, norm_stats, logs = train_cnn_model_on_dataframes(train_df, val_df, test_df)
+    filtere_ML_csv_file_path = data_dir / "filtered_ML_data_all_battery_cells.csv"
+    filtered_ml_df = pd.read_csv(filtere_ML_csv_file_path)
+
+    plot_true_soh_vs_predicted_soh_for_battery_cell("B10", filtered_ml_df, model, norm_stats)
+    plot_true_soh_vs_predicted_soh_for_battery_cell("B11", filtered_ml_df, model, norm_stats)
+    plot_true_soh_vs_predicted_soh_for_battery_cell("B12", filtered_ml_df, model, norm_stats)
 
 if __name__ == "__main__":
     main()
