@@ -149,36 +149,59 @@ def create_train_val_test_splits(ML_data_df: pd.DataFrame):
 def get_nyquist_train_val_test_data(
     train_df: pd.DataFrame,
     val_df: pd.DataFrame,
-    test_df: pd.DataFrame
+    test_df: pd.DataFrame,
+    features_to_use: str
 ):
     # Extract features and targets from the dataframes
-    def extract_X_y(df: pd.DataFrame):
+    def extract_X_y(df: pd.DataFrame, features_to_use: str):
         X = df.drop(columns=["battery_cell_name", "cycle_number", "SOH_percent"]).values
         # reshape X from (N, 2n) -> (N, n, 2) with [:,:,0]=Z_real and [:,:,1]=Z_imag
         num_features = X.shape[1]
         if num_features % 4 != 0:
             raise ValueError(f"Expected even number of features (real+imag), got {num_features}")
         num_freq = num_features // 4
-
-        z_real = X[:, :num_freq].astype(np.float32)
-        z_imag = X[:, num_freq:num_freq*2].astype(np.float32)
-        X_reshaped = np.stack((z_real, z_imag), axis=2)
+        Z_REAL_FEATURE_START_COL = 0
+        Z_IMAG_FEATURE_START_COL = num_freq
+        IMP_MAG_FEATURE_START_COL = num_freq * 2
+        PHASE_DEG_FEATURE_START_COL = num_freq * 3
+        if features_to_use == "NYQUIST_ONLY":
+            z_real = X[:, Z_REAL_FEATURE_START_COL:Z_IMAG_FEATURE_START_COL].astype(np.float32)
+            z_imag = X[:, Z_IMAG_FEATURE_START_COL:IMP_MAG_FEATURE_START_COL].astype(np.float32)
+        elif features_to_use == "IMP_MAG_AND_PHASE":
+            z_real = X[:, IMP_MAG_FEATURE_START_COL:PHASE_DEG_FEATURE_START_COL].astype(np.float32)
+            z_imag = X[:, PHASE_DEG_FEATURE_START_COL:].astype(np.float32)
+        elif features_to_use == "ALL":
+            z_real = X[:, Z_REAL_FEATURE_START_COL:Z_IMAG_FEATURE_START_COL].astype(np.float32)
+            z_imag = X[:, Z_IMAG_FEATURE_START_COL:IMP_MAG_FEATURE_START_COL].astype(np.float32)
+            imp_mag = X[:, IMP_MAG_FEATURE_START_COL:PHASE_DEG_FEATURE_START_COL].astype(np.float32)
+            phase_deg = X[:, PHASE_DEG_FEATURE_START_COL:].astype(np.float32)
+        
+        if features_to_use == "ALL":
+            # Stack all four features along the last dimension
+            X_reshaped = np.stack((z_real, z_imag, imp_mag, phase_deg), axis=2)  # [N, num_freq, 4]
+        else:
+            X_reshaped = np.stack((z_real, z_imag), axis=2) # [N, num_freq, 2]
         y = df["SOH_percent"].values.astype(np.float32)
         return X_reshaped, y
+    
+    assert features_to_use in ["NYQUIST_ONLY", "IMP_MAG_AND_PHASE", "ALL"], f"Invalid features_to_use: {features_to_use}. It must be one of 'NYQUIST_ONLY', 'IMP_MAG_AND_PHASE', 'ALL'."
 
-    train_X, train_y = extract_X_y(train_df)
-    val_X, val_y = extract_X_y(val_df)
-    test_X, test_y = extract_X_y(test_df)
+    train_X, train_y = extract_X_y(train_df, features_to_use)
+    val_X, val_y = extract_X_y(val_df, features_to_use)
+    test_X, test_y = extract_X_y(test_df, features_to_use)
 
     return train_X, train_y, val_X, val_y, test_X, test_y
 
-def train_cnn_model_on_dataframes(train_df: pd.DataFrame, val_df: pd.DataFrame, test_df: pd.DataFrame) -> Tuple[TinyNyquistCNN, Tuple[np.ndarray, np.ndarray], dict]:
+def train_cnn_model_on_dataframes(train_df: pd.DataFrame, val_df: pd.DataFrame, test_df: pd.DataFrame, features_to_use: str) -> Tuple[TinyNyquistCNN, Tuple[np.ndarray, np.ndarray], dict]:
+    "features_to_use options: 'NYQUIST_ONLY', 'IMP_MAG_AND_PHASE', 'ALL'"
     print("Training CNN model on the provided dataframes...")
     print(f"Train DataFrame size: {len(train_df)}")
     print(f"Validation DataFrame size: {len(val_df)}")
     print(f"Test DataFrame size: {len(test_df)}")
 
-    train_X, train_y, val_X, val_y, test_X, test_y = get_nyquist_train_val_test_data(train_df, val_df, test_df)
+    assert features_to_use in ["NYQUIST_ONLY", "IMP_MAG_AND_PHASE", "ALL"], f"Invalid features_to_use: {features_to_use}. It must be one of 'NYQUIST_ONLY', 'IMP_MAG_AND_PHASE', 'ALL'."
+
+    train_X, train_y, val_X, val_y, test_X, test_y = get_nyquist_train_val_test_data(train_df, val_df, test_df, features_to_use)
 
     print(f"Train X shape: {train_X.shape}, Train y shape: {train_y.shape}")
     print(f"Validation X shape: {val_X.shape}, Validation y shape: {val_y.shape}")
@@ -188,11 +211,12 @@ def train_cnn_model_on_dataframes(train_df: pd.DataFrame, val_df: pd.DataFrame, 
         train_X, train_y,
         val_X=val_X, val_y=val_y,
         epochs=200,
-        batch_size=16,
+        batch_size=16, 
         lr=1e-2,
         early_patience=50,
         weight_decay=5e-4, # L2 regularization. The higher this value, the stronger the regularization
         huber_delta=1.0, # delta parameter for Huber loss. Larger delta means less sensitivity to outliers.
+        in_ch=train_X.shape[2] # Number of input channels based on features used. It is 2 for NYQUIST_ONLY or IMP_MAG_AND_PHASE, 4 for ALL.
     )
 
     print("Training loss at end of training:", logs.get("train_loss", [])[-1] if logs.get("train_loss") else "N/A")
@@ -286,7 +310,7 @@ def plot_predicted_vs_true_soh(true_y: np.ndarray, predicted_y: np.ndarray):
     plt.axis('equal')
     plt.show()
 
-def plot_true_soh_vs_predicted_soh_for_battery_cell(cell_name, filtered_ML_data_df, model, norm_stats):
+def plot_true_soh_vs_predicted_soh_for_battery_cell(cell_name, filtered_ML_data_df, model, norm_stats, features_to_use):
     import matplotlib.pyplot as plt
 
     cell_df = filtered_ML_data_df[filtered_ML_data_df["battery_cell_name"] == cell_name]
@@ -295,7 +319,7 @@ def plot_true_soh_vs_predicted_soh_for_battery_cell(cell_name, filtered_ML_data_
         return
 
     test_X, test_y = get_nyquist_train_val_test_data(
-        cell_df, cell_df, cell_df
+        cell_df, cell_df, cell_df, features_to_use
     )[:2]  # only need test_X, test_y
 
     predicted_y = predict_soh_arrays(model, test_X, norm_stats, batch_size=64)
@@ -315,7 +339,8 @@ def main():
     np.random.seed(42)
     import torch
     torch.manual_seed(42)
-    USE_SAVED_ML_DATA_CSV = False
+    USE_SAVED_ML_DATA_CSV = True
+    FEATURES_TO_USE = "ALL" # options: "NYQUIST_ONLY", "IMP_MAG_AND_PHASE", "ALL"
     current_python_file_path = Path(__file__)
     base_path = current_python_file_path.parent
     data_dir = base_path / "data"
@@ -332,13 +357,13 @@ def main():
         ML_data_df = create_ml_data_dataframe()
         train_df, val_df, test_df = create_train_val_test_splits(ML_data_df)
     
-    model, norm_stats, logs = train_cnn_model_on_dataframes(train_df, val_df, test_df)
+    model, norm_stats, logs = train_cnn_model_on_dataframes(train_df, val_df, test_df, FEATURES_TO_USE)
     filtere_ML_csv_file_path = data_dir / "filtered_ML_data_all_battery_cells.csv"
     filtered_ml_df = pd.read_csv(filtere_ML_csv_file_path)
 
-    plot_true_soh_vs_predicted_soh_for_battery_cell("B10", filtered_ml_df, model, norm_stats)
-    plot_true_soh_vs_predicted_soh_for_battery_cell("B11", filtered_ml_df, model, norm_stats)
-    plot_true_soh_vs_predicted_soh_for_battery_cell("B12", filtered_ml_df, model, norm_stats)
+    plot_true_soh_vs_predicted_soh_for_battery_cell("B10", filtered_ml_df, model, norm_stats, FEATURES_TO_USE)
+    plot_true_soh_vs_predicted_soh_for_battery_cell("B11", filtered_ml_df, model, norm_stats, FEATURES_TO_USE)
+    plot_true_soh_vs_predicted_soh_for_battery_cell("B12", filtered_ml_df, model, norm_stats, FEATURES_TO_USE)
 
 if __name__ == "__main__":
     main()

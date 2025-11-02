@@ -5,10 +5,11 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 
 NUMBER_OF_FREQUENCY_POINTS = 61  # Expected number of frequency points in each EIS measurement
+NUMBER_OF_DIMENSIONS = 2  # 2 for [Z_real, Z_imag] OR 2 for [Imp_Mag, Imp_Phase], OR 4 for both combined
 
 class TinyNyquistCNN(nn.Module):
     """
-    Input: [B, 2, NUMBER_OF_FREQUENCY_POINTS]  -> scalar SOH in 0..100
+    Input: [B, NUMBER_OF_DIMENSIONS, NUMBER_OF_FREQUENCY_POINTS]  -> scalar SOH in 0..100
     """
     def __init__(self, in_ch=2, p_drop=0.1):
         super().__init__()
@@ -35,7 +36,7 @@ class TinyNyquistCNN(nn.Module):
             nn.Linear(16, 1),
         )
 
-    def forward(self, x):  # x: [B, 2, NUMBER_OF_FREQUENCY_POINTS]
+    def forward(self, x):  # x: [B, NUMBER_OF_DIMENSIONS, NUMBER_OF_FREQUENCY_POINTS]
         z = self.backbone(x)
         z = self.gap(z)
         y = self.head(z)      # [B, 1]
@@ -44,21 +45,21 @@ class TinyNyquistCNN(nn.Module):
 # ---------- Dataset ----------
 class NyquistArrayDataset(Dataset):
     """
-    X: numpy array [N, NUMBER_OF_FREQUENCY_POINTS, 2]  where last dim = [Z_real, Z_imag]
+    X: numpy array [N, NUMBER_OF_FREQUENCY_POINTS, NUMBER_OF_DIMENSIONS] 
     y: numpy array [N]  SOH in 0..100
     Normalizes per-channel, per-frequency using training stats.
     """
     def __init__(self, X, y=None, mean=None, std=None):
         X = np.asarray(X, dtype=np.float32)
-        assert X.ndim == 3 and X.shape[1] == NUMBER_OF_FREQUENCY_POINTS and X.shape[2] == 2, \
-            "Expected X shape (N, NUMBER_OF_FREQUENCY_POINTS, 2) with last dim [Z_real, Z_imag]"
+        assert X.ndim == 3 and X.shape[1] == NUMBER_OF_FREQUENCY_POINTS and X.shape[2] == NUMBER_OF_DIMENSIONS, \
+            "Expected X shape (N, NUMBER_OF_FREQUENCY_POINTS, NUMBER_OF_DIMENSIONS) with last dim [Z_real, Z_imag] or [Imp_Mag, Imp_Phase] or both combined"
 
         # move channels last -> channels first for Conv1d
-        X = np.transpose(X, (0, 2, 1))   # [N, 2, NUMBER_OF_FREQUENCY_POINTS]
+        X = np.transpose(X, (0, 2, 1))   # [N, NUMBER_OF_DIMENSIONS, NUMBER_OF_FREQUENCY_POINTS]
 
         if mean is None or std is None:
-            mean = X.mean(axis=0, keepdims=True)            # [1, 2, NUMBER_OF_FREQUENCY_POINTS]
-            std  = X.std(axis=0, keepdims=True) + 1e-8      # [1, 2, NUMBER_OF_FREQUENCY_POINTS]
+            mean = X.mean(axis=0, keepdims=True)            # [1, NUMBER_OF_DIMENSIONS, NUMBER_OF_FREQUENCY_POINTS]
+            std  = X.std(axis=0, keepdims=True) + 1e-8      # [1, NUMBER_OF_DIMENSIONS, NUMBER_OF_FREQUENCY_POINTS]
         self.mean, self.std = mean, std
 
         self.X = (X - self.mean) / self.std
@@ -68,7 +69,7 @@ class NyquistArrayDataset(Dataset):
         return self.X.shape[0]
 
     def __getitem__(self, idx):
-        xb = torch.from_numpy(self.X[idx])     # [2, NUMBER_OF_FREQUENCY_POINTS]
+        xb = torch.from_numpy(self.X[idx])     # [NUMBER_OF_DIMENSIONS, NUMBER_OF_FREQUENCY_POINTS]
         if self.y is None:
             return xb
         yb = torch.tensor(self.y[idx])         # scalar
@@ -105,11 +106,14 @@ def evaluate_metrics_on_loader(model, loader, device=None):
 def train_nyquist_cnn_from_arrays(
     train_X, train_y, val_X=None, val_y=None,
     epochs=200, batch_size=32, lr=1e-3, weight_decay=1e-4,
-    huber_delta=1.0, early_patience=20, device=None
+    huber_delta=1.0, early_patience=20, device=None, in_ch=2
 ):
+    global NUMBER_OF_DIMENSIONS
+    NUMBER_OF_DIMENSIONS = in_ch
     print("Training TinyNyquistCNN model with the following parameters:")
     print(f"  epochs={epochs}, batch_size={batch_size}, lr={lr}, weight_decay={weight_decay}")
     print(f"  huber_delta={huber_delta}, early_patience={early_patience}")
+    print(f"  in_ch={in_ch}")
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
 
     # Fit normalization on train only
@@ -124,7 +128,7 @@ def train_nyquist_cnn_from_arrays(
         val_ds = NyquistArrayDataset(val_X, val_y, mean=mean, std=std)
         val_ld = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
 
-    model = TinyNyquistCNN().to(device)
+    model = TinyNyquistCNN(in_ch=in_ch).to(device)
     criterion = nn.HuberLoss(delta=huber_delta)
     optim = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=max(10, epochs))
