@@ -37,6 +37,8 @@ def create_ml_data_dataframe():
         ML_data_cell_df["Z_imag"] = (
             merged_df["impedance_magnitude_Ohms"] * np.sin(np.radians(merged_df["phase_deg"]))
         )
+        ML_data_cell_df["impedance_magnitude_Ohms"] = merged_df["impedance_magnitude_Ohms"]
+        ML_data_cell_df["phase_deg"] = merged_df["phase_deg"]
         ML_data_cell_df["battery_cell_name"] = battery_cell_name
         ML_data_df = pd.concat([ML_data_df, ML_data_cell_df], ignore_index=True)
     print("Combined ML Data DataFrame:")
@@ -92,11 +94,17 @@ def create_train_val_test_splits(ML_data_df: pd.DataFrame):
 
         z_real_vals = g_sorted["Z_real"].values
         z_imag_vals = g_sorted["Z_imag"].values
+        impedance_magnitude_vals = g_sorted["impedance_magnitude_Ohms"].values
+        phase_deg_vals = g_sorted["phase_deg"].values
 
         for i, v in enumerate(z_real_vals):
             row[f"Z_real_{i}"] = v
         for i, v in enumerate(z_imag_vals):
             row[f"Z_imag_{i}"] = v
+        for i, v in enumerate(impedance_magnitude_vals):
+            row[f"imp_mag_{i}"] = v
+        for i, v in enumerate(phase_deg_vals):
+            row[f"ph_deg_{i}"] = v
 
         rows.append(row)
 
@@ -105,7 +113,9 @@ def create_train_val_test_splits(ML_data_df: pd.DataFrame):
     # enforce column order: battery_number, cycle_number, SOH_percent, Z_real_*, Z_imag_*, keep battery_cell_name as well
     z_real_cols = [f"Z_real_{i}" for i in range(common_length)]
     z_imag_cols = [f"Z_imag_{i}" for i in range(common_length)]
-    ordered_cols = ["battery_cell_name", "cycle_number", "SOH_percent"] + z_real_cols + z_imag_cols
+    impedance_magnitude_cols = [f"imp_mag_{i}" for i in range(common_length)]
+    phase_deg_cols = [f"ph_deg_{i}" for i in range(common_length)]
+    ordered_cols = ["battery_cell_name", "cycle_number", "SOH_percent"] + z_real_cols + z_imag_cols + impedance_magnitude_cols + phase_deg_cols
     # keep only columns that actually exist (defensive in case of odd edge cases)
     ordered_cols = [c for c in ordered_cols if c in new_ML_data_df.columns]
     new_ML_data_df = new_ML_data_df[ordered_cols]
@@ -129,6 +139,7 @@ def create_train_val_test_splits(ML_data_df: pd.DataFrame):
     data_dir = base_path / "data"
     data_dir.mkdir(exist_ok=True)
     ML_data_df.to_csv(data_dir / "filtered_ML_data_all_battery_cells.csv", index=False)
+    print(f"Saved filtered ML data to {data_dir / 'filtered_ML_data_all_battery_cells.csv'}")
     train_df.to_csv(data_dir / "train_data.csv", index=False)
     val_df.to_csv(data_dir / "val_data.csv", index=False)
     test_df.to_csv(data_dir / "test_data.csv", index=False)
@@ -145,12 +156,12 @@ def get_nyquist_train_val_test_data(
         X = df.drop(columns=["battery_cell_name", "cycle_number", "SOH_percent"]).values
         # reshape X from (N, 2n) -> (N, n, 2) with [:,:,0]=Z_real and [:,:,1]=Z_imag
         num_features = X.shape[1]
-        if num_features % 2 != 0:
+        if num_features % 4 != 0:
             raise ValueError(f"Expected even number of features (real+imag), got {num_features}")
-        num_freq = num_features // 2
+        num_freq = num_features // 4
 
         z_real = X[:, :num_freq].astype(np.float32)
-        z_imag = X[:, num_freq:].astype(np.float32)
+        z_imag = X[:, num_freq:num_freq*2].astype(np.float32)
         X_reshaped = np.stack((z_real, z_imag), axis=2)
         y = df["SOH_percent"].values.astype(np.float32)
         return X_reshaped, y
@@ -304,7 +315,7 @@ def main():
     np.random.seed(42)
     import torch
     torch.manual_seed(42)
-    USE_SAVED_ML_DATA_CSV = True
+    USE_SAVED_ML_DATA_CSV = False
     current_python_file_path = Path(__file__)
     base_path = current_python_file_path.parent
     data_dir = base_path / "data"
