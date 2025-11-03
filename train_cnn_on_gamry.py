@@ -48,7 +48,7 @@ def create_ml_data_dataframe():
 
     return ML_data_df
 
-def create_train_val_test_splits(ML_data_df: pd.DataFrame):
+def create_train_val_test_splits(ML_data_df: pd.DataFrame, style:str="random") -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     # Keep only groups (cycle_number, battery_cell_name) that have the most common
     # number of frequency points so downstream processing sees consistent-length samples.
     group_cols = ["cycle_number", "battery_cell_name"]
@@ -126,10 +126,17 @@ def create_train_val_test_splits(ML_data_df: pd.DataFrame):
     if skipped_groups:
         print(f"Filtered out {skipped_groups} groups that did not match target length {common_length}.")
     # Create train/val/test splits with the following percentages: 80% train, 10% val, 10% test.
-    train_df = ML_data_df.sample(frac=0.8, random_state=42)
-    temp_df = ML_data_df.drop(train_df.index)
-    val_df = temp_df.sample(frac=0.5, random_state=42)
-    test_df = temp_df.drop(val_df.index)
+    if style == "random":
+        train_df = ML_data_df.sample(frac=0.8, random_state=42)
+        temp_df = ML_data_df.drop(train_df.index)
+        val_df = temp_df.sample(frac=0.5, random_state=42)
+        test_df = temp_df.drop(val_df.index)
+    elif style == "test_one_cell_out":
+        # Use B10 and B11 for training (90%)/validation (10%), and B12 for testing.
+        train_val_df = ML_data_df[ML_data_df["battery_cell_name"].isin(["B10", "B11"])]
+        test_df = ML_data_df[ML_data_df["battery_cell_name"] == "B12"]
+        train_df = train_val_df.sample(frac=0.9, random_state=42)
+        val_df = train_val_df.drop(train_df.index)
     print(f"Train DataFrame size: {len(train_df)} ({len(train_df)/len(ML_data_df)*100:.2f}%)")
     print(f"Validation DataFrame size: {len(val_df)} ({len(val_df)/len(ML_data_df)*100:.2f}%)")
     print(f"Test DataFrame size: {len(test_df)} ({len(test_df)/len(ML_data_df)*100:.2f}%)")
@@ -140,9 +147,9 @@ def create_train_val_test_splits(ML_data_df: pd.DataFrame):
     data_dir.mkdir(exist_ok=True)
     ML_data_df.to_csv(data_dir / "filtered_ML_data_all_battery_cells.csv", index=False)
     print(f"Saved filtered ML data to {data_dir / 'filtered_ML_data_all_battery_cells.csv'}")
-    train_df.to_csv(data_dir / "train_data.csv", index=False)
-    val_df.to_csv(data_dir / "val_data.csv", index=False)
-    test_df.to_csv(data_dir / "test_data.csv", index=False)
+    train_df.to_csv(data_dir / "train_data_B10_B11.csv", index=False)
+    val_df.to_csv(data_dir / "val_data_B10_B11.csv", index=False)
+    test_df.to_csv(data_dir / "test_data_B12.csv", index=False)
 
     return train_df, val_df, test_df
 
@@ -330,7 +337,7 @@ def main():
         print(f"Loaded train, val, test data from CSV files.")
     else:
         ML_data_df = create_ml_data_dataframe()
-        train_df, val_df, test_df = create_train_val_test_splits(ML_data_df)
+        train_df, val_df, test_df = create_train_val_test_splits(ML_data_df, style="test_one_cell_out") # Style can be "random" or "test_one_cell_out"
     
     model, norm_stats, logs = train_cnn_model_on_dataframes(train_df, val_df, test_df)
     filtere_ML_csv_file_path = data_dir / "filtered_ML_data_all_battery_cells.csv"
