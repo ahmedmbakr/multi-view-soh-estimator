@@ -345,9 +345,30 @@ def main():
     # Fix the random seed for reproducibility
     np.random.seed(42)
     import torch
+    import os
+    import random
     torch.manual_seed(42)
+    # Python & OS-level seed
+    random.seed(42)
+    os.environ["PYTHONHASHSEED"] = "42"
+
+    # Ensure numpy/pandas randomness is fixed (numpy seed already set above in main)
+    # pandas uses numpy's RNG for operations like sample() unless a random_state is provided.
+
+    # CUDA / PyTorch determinism
+    try:
+        torch.cuda.manual_seed_all(42)
+    except Exception:
+        pass
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    try:
+        torch.use_deterministic_algorithms(True)
+    except Exception:
+        # Older PyTorch versions do not have this API
+        pass
     USE_SAVED_ML_DATA_CSV = True
-    FEATURES_TO_USE = "ALL" # options: "NYQUIST_ONLY", "IMP_MAG_AND_PHASE", "ALL"
+    FEATURES_TO_USE = "NYQUIST_ONLY" # options: "NYQUIST_ONLY", "IMP_MAG_AND_PHASE", "ALL"
     current_python_file_path = Path(__file__)
     base_path = current_python_file_path.parent
     data_dir = base_path / "data"
@@ -356,6 +377,9 @@ def main():
         train_data_csv_path = data_dir / "train_data.csv"
         val_data_csv_path = data_dir / "val_data.csv"
         test_data_csv_path = data_dir / "test_data.csv"
+        # train_data_csv_path = data_dir / "train_data_B10_B11.csv"
+        # val_data_csv_path = data_dir / "val_data_B10_B11.csv"
+        # test_data_csv_path = data_dir / "test_data_B12.csv"
         train_df = pd.read_csv(train_data_csv_path)
         val_df = pd.read_csv(val_data_csv_path)
         test_df = pd.read_csv(test_data_csv_path)

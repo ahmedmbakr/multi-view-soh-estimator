@@ -1,3 +1,9 @@
+import os
+# If torch.use_deterministic_algorithms(True) is enabled and CUDA >= 10.2,
+# set CUBLAS_WORKSPACE_CONFIG BEFORE importing torch so cuBLAS can be deterministic.
+# Valid options: ":4096:8" or ":16:8" (see CUDA/cuBLAS docs).
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+
 import math
 import numpy as np
 import torch
