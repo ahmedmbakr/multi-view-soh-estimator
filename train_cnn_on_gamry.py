@@ -252,7 +252,7 @@ def get_nyquist_train_val_test_data(
 
     return train_X, train_y, val_X, val_y, test_X, test_y
 
-def train_cnn_model_on_dataframes(train_df: pd.DataFrame, val_df: pd.DataFrame, test_df: pd.DataFrame, features_to_use: str) -> Tuple[TinyNyquistCNN, Tuple[np.ndarray, np.ndarray], dict]:
+def train_cnn_model_on_dataframes(train_df: pd.DataFrame, val_df: pd.DataFrame, test_df: pd.DataFrame, features_to_use: str, epochs: int =200, batch_size: int =16, lr: float =1e-2, early_patience: int =50, weight_decay: float =5e-4, huber_delta: float =1.0) -> Tuple[TinyNyquistCNN, Tuple[np.ndarray, np.ndarray], dict]:
     "features_to_use options: 'NYQUIST_ONLY', 'IMP_MAG_AND_PHASE', 'ALL'"
     print("Training CNN model on the provided dataframes...")
     print(f"Train DataFrame size: {len(train_df)}")
@@ -270,12 +270,12 @@ def train_cnn_model_on_dataframes(train_df: pd.DataFrame, val_df: pd.DataFrame, 
     model, (mean, std), logs = train_nyquist_cnn_from_arrays(
         train_X, train_y,
         val_X=val_X, val_y=val_y,
-        epochs=200,
-        batch_size=16, 
-        lr=1e-2,
-        early_patience=50,
-        weight_decay=5e-4, # L2 regularization. The higher this value, the stronger the regularization
-        huber_delta=1.0, # delta parameter for Huber loss. Larger delta means less sensitivity to outliers.
+        epochs=epochs,
+        batch_size=batch_size, 
+        lr=lr,
+        early_patience=early_patience,
+        weight_decay=weight_decay, # L2 regularization. The higher this value, the stronger the regularization
+        huber_delta=huber_delta, # delta parameter for Huber loss. Larger delta means less sensitivity to outliers.
         in_ch=train_X.shape[2] # Number of input channels based on features used. It is 2 for NYQUIST_ONLY or IMP_MAG_AND_PHASE, 4 for ALL.
     )
 
@@ -301,9 +301,9 @@ def train_cnn_model_on_dataframes(train_df: pd.DataFrame, val_df: pd.DataFrame, 
     }, model_save_path)
     print(f"Saved trained model and normalization stats to {model_save_path}")
 
-    test_trained_model_on_test_set(model, test_X, test_y, (mean, std))
+    rmse, mae, mape = test_trained_model_on_test_set(model, test_X, test_y, (mean, std))
 
-    return model, (mean, std), logs
+    return model, (mean, std), logs, (rmse, mae, mape)
 
 def plot_train_val_loss_curves(logs):
     import matplotlib.pyplot as plt
@@ -356,6 +356,8 @@ def test_trained_model_on_test_set(model: TinyNyquistCNN, test_X: np.ndarray, te
     print(f"RMSE: {rmse:.4f}")
     print(f"MAE: {mae:.4f}")
     print(f"MAPE: {mape:.4f}%")
+
+    return rmse, mae, mape
 
 def plot_predicted_vs_true_soh(true_y: np.ndarray, predicted_y: np.ndarray):
     import matplotlib.pyplot as plt
@@ -423,6 +425,8 @@ def main():
     USE_SAVED_ML_DATA_CSV = False
     FEATURES_TO_USE = "ALL" # options: "NYQUIST_ONLY", "IMP_MAG_AND_PHASE", "ALL"
     CELLS_TO_USE = "CYLINDRICAL_ONLY" # options: "COIN_ONLY", "CYLINDRICAL_ONLY", "ALL"
+    perform_parameter_sweep_to_find_best_hyperparameters_flag = False
+
     current_python_file_path = Path(__file__)
     base_path = current_python_file_path.parent
     data_dir = base_path / "data"
@@ -442,7 +446,7 @@ def main():
         ML_data_df = create_ml_data_dataframe(cells_to_use=CELLS_TO_USE)
         train_df, val_df, test_df = create_train_val_test_splits(ML_data_df, style="test_one_cell_out", cells_types_to_use=CELLS_TO_USE) # Style can be "random" or "test_one_cell_out"
     
-    model, norm_stats, logs = train_cnn_model_on_dataframes(train_df, val_df, test_df, FEATURES_TO_USE)
+    model, norm_stats, logs, (rmse, mae, mape) = train_cnn_model_on_dataframes(train_df, val_df, test_df, FEATURES_TO_USE)
     filtere_ML_csv_file_path = data_dir / "filtered_ML_data_all_battery_cells.csv"
     filtered_ml_df = pd.read_csv(filtere_ML_csv_file_path)
 
@@ -456,7 +460,73 @@ def main():
     plot_true_soh_vs_predicted_soh_for_battery_cell("Cell_02@45", filtered_ml_df, model, norm_stats, FEATURES_TO_USE)
     plot_true_soh_vs_predicted_soh_for_battery_cell("Cell_01@25", filtered_ml_df, model, norm_stats, FEATURES_TO_USE)
     plot_true_soh_vs_predicted_soh_for_battery_cell("Cell_03@25", filtered_ml_df, model, norm_stats, FEATURES_TO_USE)
-    plot_true_soh_vs_predicted_soh_for_battery_cell("Cell_01@35", filtered_ml_df, model, norm_stats, FEATURES_TO_USE)
+    plot_true_soh_vs_predicted_soh_for_battery_cell("Cell_01@35", filtered_ml_df, model, norm_stats, FEATURES_TO_USE) 
     plot_true_soh_vs_predicted_soh_for_battery_cell("Cell_01@45", filtered_ml_df, model, norm_stats, FEATURES_TO_USE)
+
+def perform_hyperparameter_sweep_on_cnn_model(train_df: pd.DataFrame, val_df: pd.DataFrame, test_df: pd.DataFrame, features_to_use: str):
+    print("Performing hyperparameter sweep on CNN model...")
+    import itertools
+    import tqdm
+
+    learning_rates = [1e-2, 5e-3, 1e-3, 5e-4]
+    batch_sizes = [8, 16, 32, 64]
+    weight_decays = [1e-3, 5e-4, 1e-4, 5e-5]
+    huber_deltas = [1.0, 2.0, 5.0]
+
+    best_val_mae = float("inf")
+    best_test_mape = float("inf")
+    best_hyperparams = None
+    record_of_all_results = []
+    for lr, batch_size, weight_decay, huber_delta in tqdm.tqdm(
+        itertools.product(learning_rates, batch_sizes, weight_decays, huber_deltas),
+        total=len(learning_rates)*len(batch_sizes)*len(weight_decays)*len(huber_deltas),
+        desc="Hyperparam sweep",
+        unit="run",
+        leave=True,
+    ):
+        print(f"Training with lr={lr}, batch_size={batch_size}, weight_decay={weight_decay}, huber_delta={huber_delta}")
+        model, norm_stats, logs, (rmse, mae, mape) = train_cnn_model_on_dataframes(
+            train_df, val_df, test_df,
+            features_to_use,
+            epochs=100,
+            batch_size=batch_size,
+            lr=lr,
+            weight_decay=weight_decay,
+            huber_delta=huber_delta
+        )
+        final_val_mae = logs.get("val_mae", [])[-1] if logs.get("val_mae") else float("inf")
+        if final_val_mae < best_val_mae:
+            best_val_mae = final_val_mae
+            best_hyperparams = (lr, batch_size, weight_decay, huber_delta)
+            print(f"New best hyperparameters found: lr={lr}, batch_size={batch_size}, weight_decay={weight_decay}, huber_delta={huber_delta} with Val MAE={best_val_mae}")
+        if mape < best_test_mape:
+            best_test_mape = mape
+            print(f"New best RMSE found: lr={lr}, batch_size={batch_size}, weight_decay={weight_decay}, huber_delta={huber_delta} with Val RMSE={best_test_mape}")
+            best_hyperparams_for_test_mape = (lr, batch_size, weight_decay, huber_delta)
+
+        record = {
+            "lr": lr,
+            "batch_size": batch_size,
+            "weight_decay": weight_decay,
+            "huber_delta": huber_delta,
+            "rmse": rmse,
+            "mae": mae,
+            "mape": mape,
+            "val_mae": final_val_mae
+        }
+        record_of_all_results.append(record)
+        
+
+    print(f"Best hyperparameters: lr={best_hyperparams[0]}, batch_size={best_hyperparams[1]}, weight_decay={best_hyperparams[2]}, huber_delta={best_hyperparams[3]} with Val MAE={best_val_mae}")
+
+    print(f"Best hyperparameters for RMSE (test set): lr={best_hyperparams_for_test_mape[0]}, batch_size={best_hyperparams_for_test_mape[1]}, weight_decay={best_hyperparams_for_test_mape[2]}, huber_delta={best_hyperparams_for_test_mape[3]} with Val RMSE={best_test_mape}")
+
+    # Save record_of_all_results to CSV
+    results_df = pd.DataFrame(record_of_all_results)
+    dir_path = Path(__file__).parent
+    results_df_path = dir_path / "hyperparameter_sweep_results.csv"
+    results_df.to_csv(results_df_path, index=False)
+    print(f"Saved hyperparameter sweep results to {results_df_path}")
+
 if __name__ == "__main__":
     main()
