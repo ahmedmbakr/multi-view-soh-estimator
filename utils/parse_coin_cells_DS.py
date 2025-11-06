@@ -23,8 +23,10 @@ def main():
         assert eis_file.exists(), f"EIS data file does not exist: {eis_file}"
 
         # Load capacity data
-        capacity_df = pd.read_csv(capacity_file, delim_whitespace=True, skiprows=1)
-        capacity_df = capacity_df.iloc[:, [1, 2, 3]]
+        capacity_df = pd.read_csv(capacity_file, delim_whitespace=True)
+        # print number of columns and their names
+        print(f"Capacity Data Columns for Cell 0{cell_id}: {capacity_df.columns.tolist()}")
+        capacity_df = capacity_df[["cycle_number", "ox/red", "Capacity/mA.h"]]
         capacity_df.columns = ["cycle_number", "ox_red", "capacity_Ah"]
         capacity_df.astype({
             "cycle_number": int,
@@ -32,8 +34,9 @@ def main():
             "capacity_Ah": float
         })
 
-        # Group by cycle number and take the maximum capacity for each cycle when ox_red == 1 (which indicates discharge)
-        capacity_df = capacity_df[capacity_df["ox_red"] == 1]
+
+        # Group by cycle number and take the maximum capacity for each cycle when ox_red == 0 (which indicates discharge)
+        capacity_df = capacity_df[capacity_df["ox_red"] == 0]
         capacity_df = capacity_df.groupby("cycle_number", as_index=False)["capacity_Ah"].max()
         capacity_df = capacity_df.sort_values(by="cycle_number").reset_index(drop=True)
         capacity_df["SOH_percent"] = (capacity_df["capacity_Ah"] / capacity_df["capacity_Ah"].iloc[0]) * 100.0
@@ -86,8 +89,6 @@ def main():
 
         print(f"Saved merged data for Cell 0{cell_id} to {preprocessed_dir_path / f'merged_coin_data_{cell_id}.csv'}")
 
-    plot_soh_vs_cycle_number_for_batteries()
-
 def plot_soh_vs_cycle_number_for_batteries():
     import matplotlib.pyplot as plt
 
@@ -105,6 +106,7 @@ def plot_soh_vs_cycle_number_for_batteries():
 
     analyze_battery_cells(
         batteries_csv_files,
+        capacity_column_name="capacity_Ah",
         cycle_to_plot_nyquist=1
     )
 
@@ -125,3 +127,4 @@ def merge_impedance_with_capacity(eis_df: pd.DataFrame, capacity_df: pd.DataFram
 
 if __name__ == "__main__":
     main()
+    plot_soh_vs_cycle_number_for_batteries()

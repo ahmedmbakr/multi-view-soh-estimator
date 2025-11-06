@@ -420,7 +420,7 @@ def __test_extract_nyquist_and_impedance_magnitude_phase_data():
     print(nyquist_df.head())
     print(impedance_magnitude_phase_df.head())
 
-def analyze_battery_cells(battery_cell_merged_csv_file_paths: list[Path], cycle_to_plot_nyquist: int = 1):
+def analyze_battery_cells(battery_cell_merged_csv_file_paths: list[Path], cycle_to_plot_nyquist: int = 1, capacity_column_name: str = "Q_discharge_mAh"):
     """Analyzes multiple battery cells by plotting SOH vs Cycle Number.
     """
     import matplotlib.pyplot as plt
@@ -433,6 +433,20 @@ def analyze_battery_cells(battery_cell_merged_csv_file_paths: list[Path], cycle_
     plt.title('State of Health (SOH) vs Cycle Number for Multiple Battery Cells')
     plt.xlabel('Cycle Number')
     plt.ylabel('SOH (%)')
+    plt.legend()
+    plt.grid()
+    plt.show()
+
+    # Plot the cycle number vs capacity for all cells
+    plt.figure(figsize=(10, 8))
+    for csv_file_path in battery_cell_merged_csv_file_paths:
+        battery_cell_name = csv_file_path.stem.split("_")[-1]
+        merged_df = pd.read_csv(csv_file_path)
+        capacity_df = merged_df.drop_duplicates(subset=["cycle_number"])[["cycle_number", capacity_column_name]]
+        plt.plot(capacity_df["cycle_number"], capacity_df[capacity_column_name], marker='o', label=f'Battery {battery_cell_name}')
+    plt.title('Discharge Capacity vs Cycle Number for Multiple Battery Cells')
+    plt.xlabel('Cycle Number')
+    plt.ylabel('Discharge Capacity (mAh)')
     plt.legend()
     plt.grid()
     plt.show()
