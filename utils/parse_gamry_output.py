@@ -429,7 +429,7 @@ def analyze_battery_cells(battery_cell_merged_csv_file_paths: list[Path], cycle_
         battery_cell_name = csv_file_path.stem.split("_")[-1]
         merged_df = pd.read_csv(csv_file_path)
         soh_df = merged_df.drop_duplicates(subset=["cycle_number"])[["cycle_number", "SOH_percent"]]
-        plt.scatter(soh_df["cycle_number"], soh_df["SOH_percent"], s=15, marker='o', label=f'Battery {battery_cell_name}')
+        plt.scatter(soh_df["cycle_number"], soh_df["SOH_percent"], s=10, marker='o', label=f'Battery {battery_cell_name}')
     plt.title('State of Health (SOH) vs Cycle Number for Multiple Battery Cells')
     plt.xlabel('Cycle Number')
     plt.ylabel('SOH (%)')
@@ -443,7 +443,7 @@ def analyze_battery_cells(battery_cell_merged_csv_file_paths: list[Path], cycle_
         battery_cell_name = csv_file_path.stem.split("_")[-1]
         merged_df = pd.read_csv(csv_file_path)
         capacity_df = merged_df.drop_duplicates(subset=["cycle_number"])[["cycle_number", capacity_column_name]]
-        plt.plot(capacity_df["cycle_number"], capacity_df[capacity_column_name], marker='o', label=f'Battery {battery_cell_name}')
+        plt.scatter(capacity_df["cycle_number"], capacity_df[capacity_column_name], s=10, marker='o', label=f'Battery {battery_cell_name}')
     plt.title('Discharge Capacity vs Cycle Number for Multiple Battery Cells')
     plt.xlabel('Cycle Number')
     plt.ylabel('Discharge Capacity (mAh)')
