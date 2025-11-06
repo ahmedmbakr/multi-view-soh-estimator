@@ -422,13 +422,17 @@ def main():
     else:
         ML_data_df = create_ml_data_dataframe(cells_to_use=CELLS_TO_USE)
         train_df, val_df, test_df = create_train_val_test_splits(ML_data_df, style="test_one_cell_out", cells_types_to_use=CELLS_TO_USE) # Style can be "random" or "test_one_cell_out"
+
+    if perform_parameter_sweep_to_find_best_hyperparameters_flag:
+        perform_hyperparameter_sweep_on_cnn_model(train_df, val_df, test_df, FEATURES_TO_USE)
+        return
     
     model, norm_stats, logs, (rmse, mae, mape) = train_cnn_model_on_dataframes(train_df, val_df, test_df, FEATURES_TO_USE,
-        epochs=200,
-        lr=0.005,
-        batch_size=64,
-        weight_decay=0.0005,
-        huber_delta=5,
+        epochs=300,
+        lr=0.01,
+        batch_size=16,
+        weight_decay=5e-5,
+        huber_delta=1,
         early_patience=50)
     filtere_ML_csv_file_path = data_dir / "filtered_ML_data_all_battery_cells.csv"
     filtered_ml_df = pd.read_csv(filtere_ML_csv_file_path)
@@ -455,6 +459,7 @@ def perform_hyperparameter_sweep_on_cnn_model(train_df: pd.DataFrame, val_df: pd
     batch_sizes = [8, 16, 32, 64]
     weight_decays = [1e-3, 5e-4, 1e-4, 5e-5]
     huber_deltas = [1.0, 2.0, 5.0]
+    epochs = 300
 
     best_val_mae = float("inf")
     best_test_mape = float("inf")
@@ -471,7 +476,7 @@ def perform_hyperparameter_sweep_on_cnn_model(train_df: pd.DataFrame, val_df: pd
         model, norm_stats, logs, (rmse, mae, mape) = train_cnn_model_on_dataframes(
             train_df, val_df, test_df,
             features_to_use,
-            epochs=100,
+            epochs=epochs,
             batch_size=batch_size,
             lr=lr,
             weight_decay=weight_decay,
