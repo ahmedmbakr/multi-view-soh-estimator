@@ -254,6 +254,7 @@ def get_nyquist_train_val_test_data(
 
 def train_cnn_model_on_dataframes(train_df: pd.DataFrame, val_df: pd.DataFrame, test_df: pd.DataFrame, features_to_use: str, epochs: int =200, batch_size: int =16, lr: float =1e-2, early_patience: int =50, weight_decay: float =5e-4, huber_delta: float =1.0) -> Tuple[TinyNyquistCNN, Tuple[np.ndarray, np.ndarray], dict]:
     "features_to_use options: 'NYQUIST_ONLY', 'IMP_MAG_AND_PHASE', 'ALL'"
+    reset_seeds()
     print("Training CNN model on the provided dataframes...")
     print(f"Train DataFrame size: {len(train_df)}")
     print(f"Validation DataFrame size: {len(val_df)}")
@@ -397,31 +398,7 @@ def plot_true_soh_vs_predicted_soh_for_battery_cell(cell_name, filtered_ML_data_
     plt.show()
 
 def main():
-    # Fix the random seed for reproducibility
-    np.random.seed(42)
-    import torch
-    import os
-    import random
-    torch.manual_seed(42)
-    # Python & OS-level seed
-    random.seed(42)
-    os.environ["PYTHONHASHSEED"] = "42"
-
-    # Ensure numpy/pandas randomness is fixed (numpy seed already set above in main)
-    # pandas uses numpy's RNG for operations like sample() unless a random_state is provided.
-
-    # CUDA / PyTorch determinism
-    try:
-        torch.cuda.manual_seed_all(42)
-    except Exception:
-        pass
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-    try:
-        torch.use_deterministic_algorithms(True)
-    except Exception:
-        # Older PyTorch versions do not have this API
-        pass
+    reset_seeds()
     USE_SAVED_ML_DATA_CSV = False
     FEATURES_TO_USE = "ALL" # options: "NYQUIST_ONLY", "IMP_MAG_AND_PHASE", "ALL"
     CELLS_TO_USE = "CYLINDRICAL_ONLY" # options: "COIN_ONLY", "CYLINDRICAL_ONLY", "ALL"
@@ -445,14 +422,6 @@ def main():
     else:
         ML_data_df = create_ml_data_dataframe(cells_to_use=CELLS_TO_USE)
         train_df, val_df, test_df = create_train_val_test_splits(ML_data_df, style="test_one_cell_out", cells_types_to_use=CELLS_TO_USE) # Style can be "random" or "test_one_cell_out"
-
-    model, norm_stats, logs, (rmse, mae, mape) = train_cnn_model_on_dataframes(train_df, val_df, test_df, FEATURES_TO_USE,
-    epochs=200,
-    lr=0.01,
-    batch_size=32,
-    weight_decay=0.0005,
-    huber_delta=1,
-    early_patience=50)
     
     model, norm_stats, logs, (rmse, mae, mape) = train_cnn_model_on_dataframes(train_df, val_df, test_df, FEATURES_TO_USE,
         epochs=200,
@@ -541,6 +510,24 @@ def perform_hyperparameter_sweep_on_cnn_model(train_df: pd.DataFrame, val_df: pd
     results_df_path = dir_path / "hyperparameter_sweep_results.csv"
     results_df.to_csv(results_df_path, index=False)
     print(f"Saved hyperparameter sweep results to {results_df_path}")
+
+def reset_seeds(seed=42):
+    import random, os, torch, numpy as np
+    random.seed(seed)
+    np.random.seed(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    torch.manual_seed(seed)
+    try:
+        torch.cuda.manual_seed_all(seed)
+    except Exception:
+        pass
+
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    try:
+        torch.use_deterministic_algorithms(True)
+    except Exception:
+        pass
 
 if __name__ == "__main__":
     main()
