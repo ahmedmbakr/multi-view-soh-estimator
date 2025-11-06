@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 
-NUMBER_OF_FREQUENCY_POINTS = 61  # Expected number of frequency points in each EIS measurement
+NUMBER_OF_FREQUENCY_POINTS = 60  # Expected number of frequency points in each EIS measurement
 NUMBER_OF_DIMENSIONS = 2  # 2 for [Z_real, Z_imag] OR 2 for [Imp_Mag, Imp_Phase], OR 4 for both combined
 
 class TinyNyquistCNN(nn.Module):
