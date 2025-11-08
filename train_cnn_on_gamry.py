@@ -183,11 +183,14 @@ def create_train_val_test_splits(ML_data_df: pd.DataFrame, style:str="random", c
             test_cells_names.extend(cylindrical_test_cells)
         if cells_types_to_use == "COIN_ONLY" or cells_types_to_use == "ALL":
             coin_train_val_cells = ["Cell_02@25", "Cell_05@25", "Cell_02@35", "Cell_02@45"]
-            coin_test_cells = ["Cell_01@25", "Cell_03@25", "Cell_01@35", "Cell_01@45"]
+            # coin_test_cells = ["Cell_01@25", "Cell_03@25", "Cell_01@35", "Cell_01@45"]
+            coin_test_cells = ["Cell_01@25", "Cell_01@35"]
             train_val_cells_names.extend(coin_train_val_cells)
             test_cells_names.extend(coin_test_cells)
         train_val_df = ML_data_df[ML_data_df["battery_cell_name"].isin(train_val_cells_names)]
         test_df = ML_data_df[ML_data_df["battery_cell_name"].isin(test_cells_names)]
+        # Focus on the first 300 cycles only in the test set
+        test_df = test_df[test_df["cycle_number"] <= 300]
         train_df = train_val_df.sample(frac=0.9, random_state=42)
         val_df = train_val_df.drop(train_df.index)
     print(f"Train DataFrame size: {len(train_df)} ({len(train_df)/len(ML_data_df)*100:.2f}%)")
@@ -373,14 +376,15 @@ def plot_predicted_vs_true_soh(true_y: np.ndarray, predicted_y: np.ndarray):
     plt.axis('equal')
     plt.show()
 
-def plot_true_soh_vs_predicted_soh_for_battery_cell(cell_name, filtered_ML_data_df, model, norm_stats, features_to_use):
+def plot_true_soh_vs_predicted_soh_for_battery_cell(cell_name, filtered_ML_data_df, model, norm_stats, features_to_use, max_num_cycles_to_use=None):
     import matplotlib.pyplot as plt
 
     cell_df = filtered_ML_data_df[filtered_ML_data_df["battery_cell_name"] == cell_name]
     if cell_df.empty:
         print(f"No data found for battery cell {cell_name}.")
         return
-
+    if max_num_cycles_to_use is not None and max_num_cycles_to_use > 0:
+        cell_df = cell_df[cell_df["cycle_number"] <= max_num_cycles_to_use]
     test_X, test_y = get_nyquist_train_val_test_data(
         cell_df, cell_df, cell_df, features_to_use
     )[:2]  # only need test_X, test_y
@@ -401,14 +405,15 @@ def main():
     reset_seeds()
     USE_SAVED_ML_DATA_CSV = False
     FEATURES_TO_USE = "ALL" # options: "NYQUIST_ONLY", "IMP_MAG_AND_PHASE", "ALL"
-    CELLS_TO_USE = "CYLINDRICAL_ONLY" # options: "COIN_ONLY", "CYLINDRICAL_ONLY", "ALL"
+    CELLS_TO_USE = "ALL" # options: "COIN_ONLY", "CYLINDRICAL_ONLY", "ALL"
     perform_parameter_sweep_to_find_best_hyperparameters_flag = False
+    max_num_cycles_to_use = 250 # Set to None to use all cycles or a positive integer to limit the number of cycles used.
 
     current_python_file_path = Path(__file__)
     base_path = current_python_file_path.parent
     data_dir = base_path / "data"
     if USE_SAVED_ML_DATA_CSV:
-        assert data_dir.exists(), f"Data directory does not exist: {data_dir}"
+        assert data_dir.exists(), f"Data directory does not exist: {data_dir}" 
         train_data_csv_path = data_dir / "train_data.csv"
         val_data_csv_path = data_dir / "val_data.csv"
         test_data_csv_path = data_dir / "test_data.csv"
@@ -427,28 +432,37 @@ def main():
         perform_hyperparameter_sweep_on_cnn_model(train_df, val_df, test_df, FEATURES_TO_USE)
         return
     
+    # Best parameters for cylindrical cells only (B10, B11 for train/val; B12 for test):
+    # model, norm_stats, logs, (rmse, mae, mape) = train_cnn_model_on_dataframes(train_df, val_df, test_df, FEATURES_TO_USE,
+    #     epochs=300,
+    #     lr=0.01,
+    #     batch_size=16,
+    #     weight_decay=5e-5,
+    #     huber_delta=1,
+    #     early_patience=50)
+    # Best parameters for all cells (cylindrical + coin):
     model, norm_stats, logs, (rmse, mae, mape) = train_cnn_model_on_dataframes(train_df, val_df, test_df, FEATURES_TO_USE,
-        epochs=300,
-        lr=0.01,
+        epochs=600,
+        lr=0.005,
         batch_size=16,
         weight_decay=5e-5,
-        huber_delta=1,
-        early_patience=50)
+        huber_delta=5,
+        early_patience=100)
     filtere_ML_csv_file_path = data_dir / "filtered_ML_data_all_battery_cells.csv"
     filtered_ml_df = pd.read_csv(filtere_ML_csv_file_path)
 
-    plot_true_soh_vs_predicted_soh_for_battery_cell("B10", filtered_ml_df, model, norm_stats, FEATURES_TO_USE)
-    plot_true_soh_vs_predicted_soh_for_battery_cell("B11", filtered_ml_df, model, norm_stats, FEATURES_TO_USE)
-    plot_true_soh_vs_predicted_soh_for_battery_cell("B12", filtered_ml_df, model, norm_stats, FEATURES_TO_USE)
+    plot_true_soh_vs_predicted_soh_for_battery_cell("B10", filtered_ml_df, model, norm_stats, FEATURES_TO_USE, max_num_cycles_to_use)
+    plot_true_soh_vs_predicted_soh_for_battery_cell("B11", filtered_ml_df, model, norm_stats, FEATURES_TO_USE, max_num_cycles_to_use)
+    plot_true_soh_vs_predicted_soh_for_battery_cell("B12", filtered_ml_df, model, norm_stats, FEATURES_TO_USE, max_num_cycles_to_use)
 
-    plot_true_soh_vs_predicted_soh_for_battery_cell("Cell_02@25", filtered_ml_df, model, norm_stats, FEATURES_TO_USE)
-    plot_true_soh_vs_predicted_soh_for_battery_cell("Cell_05@25", filtered_ml_df, model, norm_stats, FEATURES_TO_USE)
-    plot_true_soh_vs_predicted_soh_for_battery_cell("Cell_02@35", filtered_ml_df, model, norm_stats, FEATURES_TO_USE)
-    plot_true_soh_vs_predicted_soh_for_battery_cell("Cell_02@45", filtered_ml_df, model, norm_stats, FEATURES_TO_USE)
-    plot_true_soh_vs_predicted_soh_for_battery_cell("Cell_01@25", filtered_ml_df, model, norm_stats, FEATURES_TO_USE)
-    plot_true_soh_vs_predicted_soh_for_battery_cell("Cell_03@25", filtered_ml_df, model, norm_stats, FEATURES_TO_USE)
-    plot_true_soh_vs_predicted_soh_for_battery_cell("Cell_01@35", filtered_ml_df, model, norm_stats, FEATURES_TO_USE) 
-    plot_true_soh_vs_predicted_soh_for_battery_cell("Cell_01@45", filtered_ml_df, model, norm_stats, FEATURES_TO_USE)
+    plot_true_soh_vs_predicted_soh_for_battery_cell("Cell_02@25", filtered_ml_df, model, norm_stats, FEATURES_TO_USE, max_num_cycles_to_use)
+    plot_true_soh_vs_predicted_soh_for_battery_cell("Cell_05@25", filtered_ml_df, model, norm_stats, FEATURES_TO_USE, max_num_cycles_to_use)
+    plot_true_soh_vs_predicted_soh_for_battery_cell("Cell_02@35", filtered_ml_df, model, norm_stats, FEATURES_TO_USE, max_num_cycles_to_use)
+    plot_true_soh_vs_predicted_soh_for_battery_cell("Cell_02@45", filtered_ml_df, model, norm_stats, FEATURES_TO_USE, max_num_cycles_to_use)
+    plot_true_soh_vs_predicted_soh_for_battery_cell("Cell_01@25", filtered_ml_df, model, norm_stats, FEATURES_TO_USE, max_num_cycles_to_use)
+    # plot_true_soh_vs_predicted_soh_for_battery_cell("Cell_03@25", filtered_ml_df, model, norm_stats, FEATURES_TO_USE)
+    plot_true_soh_vs_predicted_soh_for_battery_cell("Cell_01@35", filtered_ml_df, model, norm_stats, FEATURES_TO_USE, max_num_cycles_to_use) 
+    # plot_true_soh_vs_predicted_soh_for_battery_cell("Cell_01@45", filtered_ml_df, model, norm_stats, FEATURES_TO_USE)
 
 def perform_hyperparameter_sweep_on_cnn_model(train_df: pd.DataFrame, val_df: pd.DataFrame, test_df: pd.DataFrame, features_to_use: str):
     print("Performing hyperparameter sweep on CNN model...")
@@ -459,7 +473,7 @@ def perform_hyperparameter_sweep_on_cnn_model(train_df: pd.DataFrame, val_df: pd
     batch_sizes = [8, 16, 32, 64]
     weight_decays = [1e-3, 5e-4, 1e-4, 5e-5]
     huber_deltas = [1.0, 2.0, 5.0]
-    epochs = 300
+    epochs = 600
 
     best_val_mae = float("inf")
     best_test_mape = float("inf")
@@ -468,7 +482,7 @@ def perform_hyperparameter_sweep_on_cnn_model(train_df: pd.DataFrame, val_df: pd
     for lr, batch_size, weight_decay, huber_delta in tqdm.tqdm(
         itertools.product(learning_rates, batch_sizes, weight_decays, huber_deltas),
         total=len(learning_rates)*len(batch_sizes)*len(weight_decays)*len(huber_deltas),
-        desc="Hyperparam sweep",
+        desc="Hyperparam sweep", 
         unit="run",
         leave=True,
     ):
@@ -480,7 +494,8 @@ def perform_hyperparameter_sweep_on_cnn_model(train_df: pd.DataFrame, val_df: pd
             batch_size=batch_size,
             lr=lr,
             weight_decay=weight_decay,
-            huber_delta=huber_delta
+            huber_delta=huber_delta,
+            early_patience=100
         )
         final_val_mae = logs.get("val_mae", [])[-1] if logs.get("val_mae") else float("inf")
         if final_val_mae < best_val_mae:
