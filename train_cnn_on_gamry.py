@@ -367,13 +367,17 @@ def plot_predicted_vs_true_soh(true_y: np.ndarray, predicted_y: np.ndarray):
     import matplotlib.pyplot as plt
 
     plt.figure(figsize=(8, 8))
+    fontsize = 18
     plt.scatter(true_y, predicted_y, alpha=0.6)
-    plt.plot([true_y.min(), true_y.max()], [true_y.min(), true_y.max()], 'r--', lw=2) # diagonal line. LW=line width
-    plt.xlabel("True SOH (%)")
-    plt.ylabel("Predicted SOH (%)")
-    plt.title("Predicted vs True SOH on Test Set")
+    plt.plot([true_y.min(), true_y.max()], [true_y.min(), true_y.max()], 'r--', lw=2)  # diagonal line
+    plt.xlabel("True SOH (%)", fontsize=fontsize)
+    plt.ylabel("Predicted SOH (%)", fontsize=fontsize)
+    plt.title("Predicted vs True SOH on Test Set", fontsize=fontsize + 2)
+    plt.xticks(fontsize=fontsize - 2)
+    plt.yticks(fontsize=fontsize - 2)
     plt.grid(True)
     plt.axis('equal')
+    plt.legend(["Ideal Prediction", "Model Predictions"], prop={"size": fontsize - 2})
     plt.show()
 
 def plot_true_soh_vs_predicted_soh_for_battery_cell(cell_name, filtered_ML_data_df, model, norm_stats, features_to_use, max_num_cycles_to_use=None):
@@ -404,9 +408,9 @@ def plot_true_soh_vs_predicted_soh_for_battery_cell(cell_name, filtered_ML_data_
 def main():
     reset_seeds()
     USE_SAVED_ML_DATA_CSV = False
-    FEATURES_TO_USE = "ALL" # options: "NYQUIST_ONLY", "IMP_MAG_AND_PHASE", "ALL"
+    FEATURES_TO_USE = "IMP_MAG_AND_PHASE" # options: "NYQUIST_ONLY", "IMP_MAG_AND_PHASE", "ALL"
     CELLS_TO_USE = "ALL" # options: "COIN_ONLY", "CYLINDRICAL_ONLY", "ALL"
-    perform_parameter_sweep_to_find_best_hyperparameters_flag = False
+    perform_parameter_sweep_to_find_best_hyperparameters_flag = True
     max_num_cycles_to_use = 250 # Set to None to use all cycles or a positive integer to limit the number of cycles used.
 
     current_python_file_path = Path(__file__)
@@ -432,7 +436,7 @@ def main():
         perform_hyperparameter_sweep_on_cnn_model(train_df, val_df, test_df, FEATURES_TO_USE)
         return
     
-    # Best parameters for cylindrical cells only (B10, B11 for train/val; B12 for test):
+    # # Best parameters for cylindrical cells only (B10, B11 for train/val; B12 for test):
     # model, norm_stats, logs, (rmse, mae, mape) = train_cnn_model_on_dataframes(train_df, val_df, test_df, FEATURES_TO_USE,
     #     epochs=300,
     #     lr=0.01,
@@ -440,6 +444,16 @@ def main():
     #     weight_decay=5e-5,
     #     huber_delta=1,
     #     early_patience=50)
+
+    # # Best parameters for coin cells only (Cell_02@25, Cell_05@25, Cell_02@35, Cell_02@45 for train/val; Cell_01@25, Cell_03@25, Cell_01@35, Cell_01@45 for test):
+    # model, norm_stats, logs, (rmse, mae, mape) = train_cnn_model_on_dataframes(train_df, val_df, test_df, FEATURES_TO_USE,
+    #     epochs=600,
+    #     lr=0.001,
+    #     batch_size=8,
+    #     weight_decay=0.0005,
+    #     huber_delta=1,
+    #     early_patience=100)
+
     # Best parameters for all cells (cylindrical + coin):
     model, norm_stats, logs, (rmse, mae, mape) = train_cnn_model_on_dataframes(train_df, val_df, test_df, FEATURES_TO_USE,
         epochs=600,
