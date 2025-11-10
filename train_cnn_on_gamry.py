@@ -408,9 +408,9 @@ def plot_true_soh_vs_predicted_soh_for_battery_cell(cell_name, filtered_ML_data_
 def main():
     reset_seeds()
     USE_SAVED_ML_DATA_CSV = False
-    FEATURES_TO_USE = "IMP_MAG_AND_PHASE" # options: "NYQUIST_ONLY", "IMP_MAG_AND_PHASE", "ALL"
+    FEATURES_TO_USE = "NYQUIST_ONLY" # options: "NYQUIST_ONLY", "IMP_MAG_AND_PHASE", "ALL"
     CELLS_TO_USE = "ALL" # options: "COIN_ONLY", "CYLINDRICAL_ONLY", "ALL"
-    perform_parameter_sweep_to_find_best_hyperparameters_flag = True
+    perform_parameter_sweep_to_find_best_hyperparameters_flag = False
     max_num_cycles_to_use = 250 # Set to None to use all cycles or a positive integer to limit the number of cycles used.
 
     current_python_file_path = Path(__file__)
@@ -454,14 +454,23 @@ def main():
     #     huber_delta=1,
     #     early_patience=100)
 
-    # Best parameters for all cells (cylindrical + coin):
+    # Best parameters for all cells (cylindrical + coin) for Nyquist only features:
     model, norm_stats, logs, (rmse, mae, mape) = train_cnn_model_on_dataframes(train_df, val_df, test_df, FEATURES_TO_USE,
         epochs=600,
-        lr=0.005,
-        batch_size=16,
-        weight_decay=5e-5,
+        lr=0.01,
+        batch_size=64,
+        weight_decay=0.001,
         huber_delta=5,
         early_patience=100)
+
+    # # Best parameters for all cells (cylindrical + coin) for Nyquist + Mag/Phase features:
+    # model, norm_stats, logs, (rmse, mae, mape) = train_cnn_model_on_dataframes(train_df, val_df, test_df, FEATURES_TO_USE,
+    #     epochs=600,
+    #     lr=0.005,
+    #     batch_size=16,
+    #     weight_decay=5e-5,
+    #     huber_delta=5,
+    #     early_patience=100)
     filtere_ML_csv_file_path = data_dir / "filtered_ML_data_all_battery_cells.csv"
     filtered_ml_df = pd.read_csv(filtere_ML_csv_file_path)
 

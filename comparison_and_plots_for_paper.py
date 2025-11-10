@@ -140,9 +140,22 @@ def plot_for_paper():
                 true_y_cell = test_df[cell_indices]["SOH_percent"].values
                 predicted_y_cell = predicted_y[cell_indices.values]
                 
-                # Create line plots with markers
+                # Calculate MAPE for each sample
+                mape_cell = np.abs((true_y_cell - predicted_y_cell) / true_y_cell) * 100.0
+                
+                # Create line plots with markers on primary axis
                 ax.plot(true_y_cell, label="True SOH", marker='o')
                 ax.plot(predicted_y_cell, label="Predicted SOH", marker='x')
+                
+                # Create secondary y-axis for MAPE
+                ax2 = ax.twinx()
+                ax2.plot(mape_cell, label="MAPE", color='red', alpha=0.5, linestyle='', marker='o', markerfacecolor='none', markeredgecolor='red', markersize=8)
+                
+                # Add average MAPE line
+                avg_mape = np.mean(mape_cell)
+                ax2.axhline(y=avg_mape, color='red', linestyle='--', linewidth=2, label=f'Avg MAPE: {avg_mape:.0f}%')
+                
+                ax2.set_ylim(0, 100)  # Set MAPE axis range from 0 to 100%
                 
                 # Set labels - only show on outer edges
                 # Show "Cycle number" only on the last row
@@ -157,6 +170,14 @@ def plot_for_paper():
                 else:
                     ax.set_ylabel("")
                 
+                # Show "MAPE (%)" only on the last column
+                if col_idx == num_features - 1:
+                    ax2.set_ylabel("MAPE (%)", fontsize=fontsize, color='red')
+                    ax2.tick_params(axis='y', labelcolor='red', labelsize=fontsize - 2)
+                else:
+                    ax2.set_ylabel("")
+                    ax2.tick_params(axis='y', labelsize=0)  # Hide tick labels
+                
                 # Get plot name for cell
                 plot_cell_name = cell_name_to_plot_name_dict.get(cell_name, cell_name)
                 
@@ -170,8 +191,10 @@ def plot_for_paper():
                 ax.tick_params(axis='both', which='major', labelsize=fontsize - 2)
                 ax.grid(True)
                 
-                # Add legend
-                ax.legend(prop={"size": fontsize - 2})
+                # Combine legends from both axes
+                lines1, labels1 = ax.get_legend_handles_labels()
+                lines2, labels2 = ax2.get_legend_handles_labels()
+                ax.legend(lines1 + lines2, labels1 + labels2, loc='upper right', prop={"size": fontsize - 2})
         
         plt.tight_layout()
         plt.savefig(dir_path / "comparison_plot_for_paper.png", dpi=600, bbox_inches='tight')
