@@ -169,6 +169,7 @@ def plot_for_paper():
                     ax.set_ylabel("SOH (%)", fontsize=fontsize)
                 else:
                     ax.set_ylabel("")
+                    ax.tick_params(axis='y', labelleft=False)  # Hide left y-axis tick labels
                 
                 # Show "MAPE (%)" only on the last column
                 if col_idx == num_features - 1:
@@ -197,7 +198,7 @@ def plot_for_paper():
                 ax.legend(lines1 + lines2, labels1 + labels2, loc='upper right', prop={"size": fontsize - 2})
         
         plt.tight_layout()
-        plt.savefig(dir_path / "comparison_plot_for_paper.png", dpi=600, bbox_inches='tight')
+        plt.savefig(dir_path / "comparison_plot_for_paper.pdf", dpi=600, bbox_inches='tight')
         plt.show()
         print(f"Comparison plot saved to {dir_path / 'comparison_plot_for_paper.png'}")
 
