@@ -9,6 +9,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
+import time
 
 NUMBER_OF_FREQUENCY_POINTS = 60  # Expected number of frequency points in each EIS measurement
 NUMBER_OF_DIMENSIONS = 2  # 2 for [Z_real, Z_imag] OR 2 for [Imp_Mag, Imp_Phase], OR 4 for both combined
@@ -199,8 +200,28 @@ def predict_soh_arrays(model, X, norm_stats, batch_size=64, device=None):
     ds = NyquistArrayDataset(X, y=None, mean=mean, std=std)
     ld = DataLoader(ds, batch_size=batch_size, shuffle=False)
     model.eval().to(device)
+
     out = []
+    total_time = 0.0
+    total_items = 0
+    is_cuda = device.startswith("cuda") and torch.cuda.is_available()
+
     for xb in ld:
         xb = xb.to(device)
-        out.append(model(xb).cpu().numpy())
-    return np.concatenate(out, axis=0)  # SOH in 0..100
+        if is_cuda:
+            torch.cuda.synchronize()
+        t0 = time.perf_counter()
+        y = model(xb)
+        if is_cuda:
+            torch.cuda.synchronize()
+        t1 = time.perf_counter()
+
+        elapsed = t1 - t0
+        total_time += elapsed
+        total_items += xb.size(0)
+        out.append(y.cpu().numpy())
+
+    preds = np.concatenate(out, axis=0) if out else np.empty((0,), dtype=np.float32)
+    avg_time_per_input = (total_time / total_items) if total_items > 0 else 0.0
+    print(f"Average prediction time per input: {avg_time_per_input * 1000.0:.4f} ms")
+    return preds 

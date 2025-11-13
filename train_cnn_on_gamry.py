@@ -347,7 +347,7 @@ def plot_mae_and_mape_curves(logs):
 
 def test_trained_model_on_test_set(model: TinyNyquistCNN, test_X: np.ndarray, test_y: np.ndarray, norm_stats):
     from sklearn.metrics import mean_squared_error, mean_absolute_error
-
+    
     predicted_y = predict_soh_arrays(model, test_X, norm_stats, batch_size=64)
 
     plot_predicted_vs_true_soh(test_y, predicted_y)
@@ -408,8 +408,8 @@ def plot_true_soh_vs_predicted_soh_for_battery_cell(cell_name, filtered_ML_data_
 def main():
     reset_seeds()
     USE_SAVED_ML_DATA_CSV = False
-    FEATURES_TO_USE = "IMP_MAG_AND_PHASE" # options: "NYQUIST_ONLY", "IMP_MAG_AND_PHASE", "ALL"
-    CELLS_TO_USE = "ALL" # options: "COIN_ONLY", "CYLINDRICAL_ONLY", "ALL"
+    FEATURES_TO_USE = "NYQUIST_ONLY" # options: "NYQUIST_ONLY", "IMP_MAG_AND_PHASE", "ALL"
+    CELLS_TO_USE = "COIN_ONLY" # options: "COIN_ONLY", "CYLINDRICAL_ONLY", "ALL"
     perform_parameter_sweep_to_find_best_hyperparameters_flag = False
     max_num_cycles_to_use = 250 # Set to None to use all cycles or a positive integer to limit the number of cycles used.
 
@@ -445,7 +445,25 @@ def main():
     #     huber_delta=1,
     #     early_patience=50)
 
-    # # Best parameters for coin cells only (Cell_02@25, Cell_05@25, Cell_02@35, Cell_02@45 for train/val; Cell_01@25, Cell_03@25, Cell_01@35, Cell_01@45 for test):
+    # # Best parameters for coin cells only (Cell_02@25, Cell_05@25, Cell_02@35, Cell_02@45 for train/val; Cell_01@25, Cell_03@25, Cell_01@35, Cell_01@45 for test) for Nyquist only features:
+    # model, norm_stats, logs, (rmse, mae, mape) = train_cnn_model_on_dataframes(train_df, val_df, test_df, FEATURES_TO_USE,
+    #     epochs=200,
+    #     lr=0.005,
+    #     batch_size=8,
+    #     weight_decay=0.0005,
+    #     huber_delta=5,
+    #     early_patience=50)
+
+    # # Best parameters for coin cells only (Cell_02@25, Cell_05@25, Cell_02@35, Cell_02@45 for train/val; Cell_01@25, Cell_03@25, Cell_01@35, Cell_01@45 for test) for Mag/Phase only features:
+    # model, norm_stats, logs, (rmse, mae, mape) = train_cnn_model_on_dataframes(train_df, val_df, test_df, FEATURES_TO_USE,
+    #     epochs=200,
+    #     lr=0.01,
+    #     batch_size=16,
+    #     weight_decay=0.0001,
+    #     huber_delta=2,
+    #     early_patience=50)
+
+    # # Best parameters for coin cells only (Cell_02@25, Cell_05@25, Cell_02@35, Cell_02@45 for train/val; Cell_01@25, Cell_03@25, Cell_01@35, Cell_01@45 for test) for both Nyquist and Mag/Phase features:
     # model, norm_stats, logs, (rmse, mae, mape) = train_cnn_model_on_dataframes(train_df, val_df, test_df, FEATURES_TO_USE,
     #     epochs=600,
     #     lr=0.001,
@@ -463,23 +481,23 @@ def main():
     #     huber_delta=5,
     #     early_patience=100)
 
-    # Best parameters for all cells (cylindrical + coin) for mag/phase only features:
-    model, norm_stats, logs, (rmse, mae, mape) = train_cnn_model_on_dataframes(train_df, val_df, test_df, FEATURES_TO_USE,
-        epochs=600,
-        lr=0.01,
-        batch_size=32,
-        weight_decay=5e-5,
-        huber_delta=2,
-        early_patience=100)
-
-    # # Best parameters for all cells (cylindrical + coin) for Nyquist + Mag/Phase features:
+    # # Best parameters for all cells (cylindrical + coin) for mag/phase only features:
     # model, norm_stats, logs, (rmse, mae, mape) = train_cnn_model_on_dataframes(train_df, val_df, test_df, FEATURES_TO_USE,
     #     epochs=600,
-    #     lr=0.005,
-    #     batch_size=16,
+    #     lr=0.01,
+    #     batch_size=32,
     #     weight_decay=5e-5,
-    #     huber_delta=5,
+    #     huber_delta=2,
     #     early_patience=100)
+
+    # Best parameters for all cells (cylindrical + coin) for Nyquist + Mag/Phase features:
+    model, norm_stats, logs, (rmse, mae, mape) = train_cnn_model_on_dataframes(train_df, val_df, test_df, FEATURES_TO_USE,
+        epochs=600,
+        lr=0.005,
+        batch_size=16,
+        weight_decay=5e-5,
+        huber_delta=5,
+        early_patience=100)
     filtere_ML_csv_file_path = data_dir / "filtered_ML_data_all_battery_cells.csv"
     filtered_ml_df = pd.read_csv(filtere_ML_csv_file_path)
 
@@ -505,7 +523,7 @@ def perform_hyperparameter_sweep_on_cnn_model(train_df: pd.DataFrame, val_df: pd
     batch_sizes = [8, 16, 32, 64]
     weight_decays = [1e-3, 5e-4, 1e-4, 5e-5]
     huber_deltas = [1.0, 2.0, 5.0]
-    epochs = 600
+    epochs = 200
 
     best_val_mae = float("inf")
     best_test_mape = float("inf")
@@ -527,7 +545,7 @@ def perform_hyperparameter_sweep_on_cnn_model(train_df: pd.DataFrame, val_df: pd
             lr=lr,
             weight_decay=weight_decay,
             huber_delta=huber_delta,
-            early_patience=100
+            early_patience=50
         )
         final_val_mae = logs.get("val_mae", [])[-1] if logs.get("val_mae") else float("inf")
         if final_val_mae < best_val_mae:
