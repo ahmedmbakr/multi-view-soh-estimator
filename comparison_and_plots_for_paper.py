@@ -104,7 +104,7 @@ def plot_true_vs_predicted_soh_for_paper():
             ax.plot([min_soh, max_soh], [min_soh, max_soh], 'g--', lw=2, label='Ideal Prediction')
             
             # Add text box with metrics
-            textstr = f'RMSE: {rmse:.2f}\nMAE  : {mae:.2f}\nMAPE: {mape:.2f}'
+            textstr = f'RMSE: {rmse:.1f}\nMAE  : {mae:.1f}\nMAPE: {mape:.1f}'
             props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
             ax.text(0.05, 0.95, textstr, transform=ax.transAxes, fontsize=fontsize - 2,
                    verticalalignment='top', bbox=props)
@@ -230,7 +230,7 @@ def plot_for_paper():
                 
                 # Add average MAPE line
                 avg_mape = np.mean(mape_cell)
-                ax2.axhline(y=avg_mape, color='red', linestyle='--', linewidth=2, label=f'Avg MAPE: {avg_mape:.0f}%')
+                ax2.axhline(y=avg_mape, color='red', linestyle='--', linewidth=2, label=f'Avg MAPE: {avg_mape:.1f}%')
                 
                 ax2.set_ylim(0, 100)  # Set MAPE axis range from 0 to 100%
                 
@@ -272,7 +272,10 @@ def plot_for_paper():
                 # Combine legends from both axes
                 lines1, labels1 = ax.get_legend_handles_labels()
                 lines2, labels2 = ax2.get_legend_handles_labels()
-                ax.legend(lines1 + lines2, labels1 + labels2, loc='upper right', prop={"size": fontsize - 2})
+                if row_idx == 2:
+                    ax.legend(lines1 + lines2, labels1 + labels2, loc='upper right', prop={"size": fontsize - 2})
+                else:
+                    ax.legend(lines1 + lines2, labels1 + labels2, loc='center left', bbox_to_anchor=(0.01, 0.35), prop={"size": fontsize - 2}) # 0.01 is the x offset from the left and 0.35 is the y offset
         
         plt.tight_layout()
         plt.savefig(dir_path / "comparison_plot_for_paper.pdf", dpi=600, bbox_inches='tight')
@@ -523,8 +526,8 @@ def print_num_parameters_in_cnn():
     print(f"Total number of trainable parameters in TinyNyquistCNN: {total_params}")
 
 if __name__ == "__main__":
-    # print_num_parameters_in_cnn()
-    plot_true_vs_predicted_soh_for_paper()
-    # plot_for_paper()
+    print_num_parameters_in_cnn()
+    # plot_true_vs_predicted_soh_for_paper()
+    plot_for_paper()
     # plot_nyquist_for_paper()
     # plot_mag_phase_for_paper()
